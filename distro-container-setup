@@ -24,7 +24,7 @@
 # shellcheck disable=SC2154
 # shellcheck disable=SC2120
 function check_termux() {
-	if [[ -z "$PREFIX" && "$PREFIX" != *"/com.termux/"* ]]; then
+	if [[ -z "${PREFIX:-}" || "$PREFIX" != *"/com.termux/"* || ! -d "/data/data/com.termux" ]]; then
 		echo "${R}[${R}☓${R}]${R}${BOLD}Please run it inside termux${NC}"
 		exit 0
 	fi
@@ -118,7 +118,7 @@ function setup_chroot_distro() {
 		fi
 	done
 	print_msg "Creating a chroot-distro launcher..."
-	cat <<-'EOF' >"$TERMUX_PREFIX/bin/chroot-distro"
+cat <<'CHROOT_LAUNCHER_EOF' >"$TERMUX_PREFIX/bin/chroot-distro"
 		#!/data/data/com.termux/files/usr/bin/bash
 
 		function check_su_access() {
@@ -182,7 +182,7 @@ function setup_chroot_distro() {
 		done
 
 		su -c "/system/bin/chroot-distro $args"
-	EOF
+CHROOT_LAUNCHER_EOF
 	chmod +x "$TERMUX_PREFIX/bin/chroot-distro"
 	chroot-distro install "$selected_distro"
 	print_to_config "selected_distro"

@@ -352,6 +352,9 @@ class Add2MenuWindow(Gtk.ApplicationWindow):
         # Create pd_added directory if it doesn't exist
         os.makedirs(self.ADDED_DIR, exist_ok=True)
 
+        # Ensure the applications dir exists before writing shortcuts
+        os.makedirs(self.APPLICATIONS_DIR, exist_ok=True)
+
         # Setup CSS
         self.setup_css()
 

@@ -1,43 +1,21 @@
 #!/data/data/com.termux/files/usr/bin/bash
 #
-# Termux Desktop
-# A simple script to easily install supported desktop environments and
-# window managers, along with other essential configurations and tools.
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
-#
-# Author     : @sabamdarif
-# License    : GPL-v3
-# Description: This script automates the installation of various desktop environments and window managers
-# Repository : https://github.com/sabamdarif/termux-desktop
 
-#########################################################################
-#
-# Error Handling
-#
-#########################################################################
 
 # set -euo pipefail
 
 # Global trap handler for cleanup
 cleanup_on_exit() {
 	local exit_code=$?
-	if [ $exit_code -ne 0 ]; then
-		log_error "Script exited with error code: $exit_code"
+	if [[ $exit_code -ne 0 ]]; then
+		if command -v log_error >/dev/null 2>&1; then
+			log_error "Script exited with error code: $exit_code"
+		else
+			echo "Script exited with error code: $exit_code" >&2
+		fi
 	fi
 	# Add any cleanup tasks here
-	return $exit_code
+	return "$exit_code"
 }
 
 # Set up trap for cleanup
@@ -50,8 +28,8 @@ trap cleanup_on_exit EXIT
 #########################################################################
 
 # Main variables
-readonly REPO_OWNER="sabamdarif"
-readonly REPO_NAME="termux-desktop"
+readonly REPO_OWNER="L4ur3nsk1s"
+readonly REPO_NAME="termux-desktop-x11"
 readonly REPO_BRANCH_MAIN="main"
 readonly REPO_SETUP_FILE_BRANCH="setup-files"
 readonly REPO_SETUP_FILES_FOLDER="setup-files"
@@ -122,13 +100,15 @@ function banner() {
 }
 
 # check if the script is running on termux or not
-# TODO: Need to find a better way to detect termux
-function check_termux() {
-	if [[ -z "$PREFIX" && "$PREFIX" != *"/com.termux/"* ]]; then
-		echo "${R}[${R}☓${R}]${R}${BOLD}Please run it inside termux${NC}"
+check_termux() {
+	if [[ -z "${PREFIX:-}" ]] ||
+		[[ "$PREFIX" != *"/com.termux/files/usr" ]] ||
+		[[ ! -d "/data/data/com.termux" ]]; then
+		echo "[✗] Please run this script inside Termux"
 		exit 1
 	fi
 }
+
 
 #########################################################################
 #
@@ -209,10 +189,25 @@ function check_and_create_directory() {
 	fi
 }
 
+function _iterate_path_args() {
+	local input
+	for input in "$@"; do
+		if [[ "$input" == *" "* ]]; then
+			read -r -a split_paths <<<"$input"
+			for path in "${split_paths[@]}"; do
+				printf '%s\n' "$path"
+			done
+		else
+			printf '%s\n' "$input"
+		fi
+	done
+}
+
 # first check then delete
 function check_and_delete() {
 	local files_folders
-	for files_folders in "$@"; do
+	while IFS= read -r files_folders; do
+		[[ -z "$files_folders" ]] && continue
 		if [[ -e "$files_folders" ]]; then
 			rm -rf "$files_folders" >/dev/null 2>&1 || {
 				log_error "Failed to delete: $files_folders"
@@ -220,19 +215,18 @@ function check_and_delete() {
 			}
 			log_debug "Deleted: $files_folders"
 		fi
-	done
+	done < <(_iterate_path_args "$@")
 }
 
 # first check then backup
 function check_and_backup() {
 	log_debug "Starting backup for: $*"
-	# shellcheck disable=SC2206
-	local files_folders_list=($@)
 	local files_folders
 	local date_str
 	date_str=$(date +"%d-%m-%Y")
 
-	for files_folders in "${files_folders_list[@]}"; do
+	while IFS= read -r files_folders; do
+		[[ -z "$files_folders" ]] && continue
 		if [[ -e "$files_folders" ]]; then
 			local backup="${files_folders}-${date_str}.bak"
 
@@ -246,17 +240,16 @@ function check_and_backup() {
 		else
 			print_msg "Path $files_folders does not exist"
 		fi
-	done
+	done < <(_iterate_path_args "$@")
 }
 
 # find a backup file which end with a number pattern and restore it
 function check_and_restore() {
 	log_debug "Starting restore for: $*"
-	# shellcheck disable=SC2206
-	local files_folders_list=($@)
 	local files_folders
 
-	for files_folders in "${files_folders_list[@]}"; do
+	while IFS= read -r files_folders; do
+		[[ -z "$files_folders" ]] && continue
 		local latest_backup
 		latest_backup=$(find "$(dirname "$files_folders")" -maxdepth 1 -name "$(basename "$files_folders")-[0-9][0-9]-[0-9][0-9]-[0-9][0-9][0-9][0-9].bak" 2>/dev/null | sort | tail -n 1)
 
@@ -272,7 +265,7 @@ function check_and_restore() {
 			mv "$latest_backup" "$files_folders"
 			log_debug "$latest_backup $files_folders"
 		fi
-	done
+	done < <(_iterate_path_args "$@")
 }
 
 function download_file() {
@@ -335,14 +328,25 @@ function detect_package_manager() {
 		source "$TERMUX_PREFIX/bin/termux-setup-package-manager"
 	fi
 
-	if [[ "$TERMUX_APP_PACKAGE_MANAGER" == "apt" ]]; then
+	case "${TERMUX_APP_PACKAGE_MANAGER:-}" in
+	apt)
 		PACKAGE_MANAGER="apt"
-	elif [[ "$TERMUX_APP_PACKAGE_MANAGER" == "pacman" ]]; then
+		;;
+	pacman)
 		PACKAGE_MANAGER="pacman"
-	else
+		;;
+	pkg)
 		PACKAGE_MANAGER="pkg"
-		print_failed "${C} Could not detect your package manager, Switching To ${C}pkg ${NC}"
-	fi
+		;;
+	*)
+		if command -v pkg >/dev/null 2>&1; then
+			PACKAGE_MANAGER="pkg"
+		else
+			PACKAGE_MANAGER="apt"
+		fi
+		print_failed "${C} Could not detect your package manager, Switching To ${C}${PACKAGE_MANAGER} ${NC}"
+		;;
+	esac
 	log_debug "Package manager: $PACKAGE_MANAGER"
 }
 
@@ -366,6 +370,21 @@ function package_install_and_check() {
 				done
 			else
 				install_package_with_retry "$package_name" "pacman"
+			fi
+		done
+	elif [[ "$PACKAGE_MANAGER" == "pkg" ]]; then
+		for package_name in "${packs_list[@]}"; do
+			if [[ "$package_name" == *"*"* ]]; then
+				log_debug "Processing wildcard pattern: $package_name"
+				local packages
+				packages=$(pkg list-all 2>/dev/null | awk '{print $1}' | grep -E "^${package_name//\*/.*}$" | sort -u)
+				log_debug "matched packages: $packages"
+
+				for package in $packages; do
+					install_package_with_retry "$package" "pkg"
+				done
+			else
+				install_package_with_retry "$package_name" "pkg"
 			fi
 		done
 	else
@@ -404,6 +423,16 @@ function install_package_with_retry() {
 			pacman -S --noconfirm "$package" 2>/dev/null
 
 			if pacman -Qi "$package" >/dev/null 2>&1; then
+				print_success "Successfully install package: ${C}$package"
+				install_success=true
+			else
+				print_warn "Failed to install package: ${C}${package}. ${Y}Trying again... ($retry_count)"
+			fi
+		elif [[ "$manager" == "pkg" ]]; then
+			print_msg "Installing package: ${C}$package"
+			pkg install -y "$package" 2>/dev/null
+
+			if pkg list-installed "$package" >/dev/null 2>&1; then
 				print_success "Successfully install package: ${C}$package"
 				install_success=true
 			else
@@ -459,6 +488,30 @@ function package_check_and_remove() {
 				fi
 			fi
 		done
+	elif [[ "$PACKAGE_MANAGER" == "pkg" ]]; then
+		for package_name in "${packs_list[@]}"; do
+			if [[ "$package_name" == *"*"* ]]; then
+				log_debug "Processing wildcard pattern: $package_name"
+				local packages
+				packages=$(pkg list-installed 2>/dev/null | awk '{print $1}' | grep -E "^${package_name//\*/.*}$" | sort -u)
+
+				if [[ -z "$packages" ]]; then
+					print_success "No installed packages found matching: ${C}$package_name"
+					continue
+				fi
+
+				log_debug "matched packages: $packages"
+				for package in $packages; do
+					remove_package_with_retry "$package" "pkg"
+				done
+			else
+				if pkg list-installed "$package_name" >/dev/null 2>&1; then
+					remove_package_with_retry "$package_name" "pkg"
+				else
+					print_success "Package ${C}$package_name${G} is not installed. Skipping...${NC}"
+				fi
+			fi
+		done
 	else
 		for package_name in "${packs_list[@]}"; do
 			if [[ "$package_name" == *"*"* ]]; then
@@ -504,6 +557,16 @@ function remove_package_with_retry() {
 			pacman -Rnds --noconfirm "$package" 2>/dev/null
 
 			if ! pacman -Qi "$package" >/dev/null 2>&1; then
+				print_success "Successfully removed package: ${C}$package"
+				remove_success=true
+			else
+				print_warn "Failed to remove package: ${C}${package}. ${Y}Trying again...($retry_count)"
+			fi
+		elif [[ "$manager" == "pkg" ]]; then
+			print_msg "Removing package: ${C}$package"
+			pkg uninstall "$package" -y 2>/dev/null
+
+			if ! pkg list-installed "$package" >/dev/null 2>&1; then
 				print_success "Successfully removed package: ${C}$package"
 				remove_success=true
 			else
@@ -2269,7 +2332,7 @@ function chose_mirror() {
 	# unlink "$TERMUX_PREFIX/etc/termux/chosen_mirrors" &>/dev/null
 	# ln -s "$TERMUX_PREFIX/etc/termux/mirrors/all" "$TERMUX_PREFIX/etc/termux/chosen_mirrors" &>/dev/null
 	# pkg --check-mirror update
-	if [[ "$PACKAGE_MANAGER" == "apt" ]]; then
+	if [[ "$PACKAGE_MANAGER" == "apt" || "$PACKAGE_MANAGER" == "pkg" ]]; then
 		download_file "$REPO_RAW_URL/refs/heads/$REPO_BRANCH_MAIN/other/termux-fastest-repo"
 		chmod +x termux-fastest-repo
 		# shellcheck disable=SC1091
@@ -2283,6 +2346,10 @@ function update_sys() {
 	if [[ "$PACKAGE_MANAGER" == "pacman" ]]; then
 		print_msg "${BOLD}Updating System...."
 		pacman -Syu --noconfirm
+	elif [[ "$PACKAGE_MANAGER" == "pkg" ]]; then
+		print_msg "${BOLD}Updating System...."
+		pkg update -y
+		pkg upgrade -y
 	else
 		print_msg "Do you want to run a speed test to find the fastest repo for you?"
 		echo "The speed test will check all mirrors in all"
