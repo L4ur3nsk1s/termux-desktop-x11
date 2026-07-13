@@ -22,8 +22,17 @@
 # Repository : https://github.com/sabamdarif/termux-desktop
 
 # shellcheck disable=SC2154
+DRY_RUN="${DRY_RUN:-false}"
+
 function check_termux() {
-	if [[ -z "${PREFIX:-}" || "$PREFIX" != *"/com.termux/"* || ! -d "/data/data/com.termux" ]]; then
+	if [[ "$DRY_RUN" == "true" ]]; then
+		if declare -f print_msg >/dev/null 2>&1; then
+			print_msg "Dry run enabled for hardware acceleration setup. No package or file changes will be made."
+		fi
+		return 0
+	fi
+
+	if [[ -z "${PREFIX:-}" || "$PREFIX" != *"/com.termux/files/usr"* || ! -d "/data/data/com.termux" ]]; then
 		echo "${R}[${R}☓${R}]${R}${BOLD}Please run it inside termux${NC}"
 		exit 0
 	fi
@@ -32,18 +41,24 @@ function check_termux() {
 function hw_install_required_packages() {
 	banner
 	print_msg "Remove old driver packages and files if installed..."
-	check_and_delete "$TERMUX_PREFIX/opt/angle-android/vulkan/libEGL.so.1"
-	check_and_delete "$TERMUX_PREFIX/opt/angle-android/vulkan/libGLESv1_CM.so.1"
-	check_and_delete "$TERMUX_PREFIX/opt/angle-android/vulkan/libGLESv2.so.2"
-	check_and_delete "$TERMUX_PREFIX/share/vulkan/icd.d/wrapper_icd.aarch64.json"
-	check_and_delete "$TERMUX_PREFIX/lib/libadrenotools.so $TERMUX_PREFIX/lib/libfile_redirect_hook.so $TERMUX_PREFIX/lib/libgsl_alloc_hook.so $TERMUX_PREFIX/lib/libhook_impl.so $TERMUX_PREFIX/lib/libmain_hook.so $TERMUX_PREFIX/lib/libvulkan_wrapper.so"
-	package_check_and_remove "vulkan-wrapper-android virglrenderer virglrenderer-android angle-android mesa-vulkan-icd-freedreno mesa-zink-vulkan-icd-freedreno mesa-vulkan-icd-freedreno-dri3"
+	if [[ "$DRY_RUN" != "true" ]]; then
+		check_and_delete "$TERMUX_PREFIX/opt/angle-android/vulkan/libEGL.so.1"
+		check_and_delete "$TERMUX_PREFIX/opt/angle-android/vulkan/libGLESv1_CM.so.1"
+		check_and_delete "$TERMUX_PREFIX/opt/angle-android/vulkan/libGLESv2.so.2"
+		check_and_delete "$TERMUX_PREFIX/share/vulkan/icd.d/wrapper_icd.aarch64.json"
+		check_and_delete "$TERMUX_PREFIX/lib/libadrenotools.so $TERMUX_PREFIX/lib/libfile_redirect_hook.so $TERMUX_PREFIX/lib/libgsl_alloc_hook.so $TERMUX_PREFIX/lib/libhook_impl.so $TERMUX_PREFIX/lib/libmain_hook.so $TERMUX_PREFIX/lib/libvulkan_wrapper.so"
+		package_check_and_remove "vulkan-wrapper-android virglrenderer virglrenderer-android angle-android mesa-vulkan-icd-freedreno mesa-zink-vulkan-icd-freedreno mesa-vulkan-icd-freedreno-dri3"
+	else
+		print_msg "Dry run: skipping package cleanup and driver removal."
+	fi
 
 	case "$exp_termux_vulkan_hw_answer" in
 	"vulkan_wrapper_android")
 		if [[ "$termux_arch" == "aarch64" || "$termux_arch" == "arm" ]]; then
 			print_msg "${BOLD}Installing vulkan-wrapper-android Driver..."
-			if [[ "$PACKAGE_MANAGER" == "pacman" ]]; then
+			if [[ "$DRY_RUN" == "true" ]]; then
+				print_msg "Dry run: skipping vulkan-wrapper-android installation."
+			elif [[ "$PACKAGE_MANAGER" == "pacman" ]]; then
 				download_file "vulkan-wrapper-android.pkg.tar.xz" "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/vulkan-wrapper-android_25.0.0-2/vulkan-wrapper-android-25.0.0-2-${termux_arch}.pkg.tar.xz"
 				pacman -Syu --needed
 				pacman -U --noconfirm vulkan-wrapper-android.pkg.tar.xz
@@ -63,10 +78,14 @@ function hw_install_required_packages() {
 	"vulkan_wrapper_android_leegaos_fork")
 		if [[ "$termux_arch" == "aarch64" ]]; then
 			print_msg "${BOLD}Installing vulkan-wrapper-android (leegao's fork) Driver..."
-			package_install_and_check "libandroid-shmem libc++ libdrm libx11 libxcb libxshmfence libwayland vulkan-loader-generic zlib zstd"
-			download_file "bionic-vulkan-wrapper.zip" "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/bionic-vulkan-wrapper-0.0.5r5/vulkan-wrapper-android-leegaos-fork-${termux_arch}.zip"
-			unzip -o bionic-vulkan-wrapper.zip -d "$TERMUX_PREFIX/"
-			check_and_delete "bionic-vulkan-wrapper.zip"
+			if [[ "$DRY_RUN" == "true" ]]; then
+				print_msg "Dry run: skipping the leegao fork installation."
+			else
+				package_install_and_check "libandroid-shmem libc++ libdrm libx11 libxcb libxshmfence libwayland vulkan-loader-generic zlib zstd"
+				download_file "bionic-vulkan-wrapper.zip" "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/bionic-vulkan-wrapper-0.0.5r5/vulkan-wrapper-android-leegaos-fork-${termux_arch}.zip"
+				unzip -o bionic-vulkan-wrapper.zip -d "$TERMUX_PREFIX/"
+				check_and_delete "bionic-vulkan-wrapper.zip"
+			fi
 		else
 			print_failed "vulkan-wrapper-android Driver isn't supported on your device"
 		fi
@@ -74,26 +93,40 @@ function hw_install_required_packages() {
 	"vulkan_wrapper_android_pipetto_crypto")
 		if [[ "$termux_arch" == "aarch64" ]]; then
 			print_msg "${BOLD}Installing vulkan-wrapper-android (pipetto-crypto's fork) Driver..."
-			download_file "pipetto-crypto-vulkan-wrapper-android.deb" "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/pipetto-crypto-vulkan-wrapper-android/pipetto-crypto-vulkan-wrapper-android_25.0.0-1_${termux_arch}.deb"
-			dpkg --configure -a
-			apt --fix-broken install -y
-			apt install ./pipetto-crypto-vulkan-wrapper-android.deb -y
-			apt install --fix-missing -y
-			check_and_delete "pipetto-crypto-vulkan-wrapper-android.deb"
+			if [[ "$DRY_RUN" == "true" ]]; then
+				print_msg "Dry run: skipping the pipetto-crypto wrapper installation."
+			else
+				download_file "pipetto-crypto-vulkan-wrapper-android.deb" "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/pipetto-crypto-vulkan-wrapper-android/pipetto-crypto-vulkan-wrapper-android_25.0.0-1_${termux_arch}.deb"
+				dpkg --configure -a
+				apt --fix-broken install -y
+				apt install ./pipetto-crypto-vulkan-wrapper-android.deb -y
+				apt install --fix-missing -y
+				check_and_delete "pipetto-crypto-vulkan-wrapper-android.deb"
+			fi
 		else
 			print_failed "vulkan-wrapper-android Driver isn't supported on your device"
 		fi
 		;;
 	"mesa_freedreno")
-		package_install_and_check "mesa-vulkan-icd-freedreno"
+		if [[ "$DRY_RUN" == "true" ]]; then
+			print_msg "Dry run: skipping mesa-freedreno installation."
+		else
+			package_install_and_check "mesa-vulkan-icd-freedreno"
+		fi
 		;;
 	"mesa_zink_freedreno")
-		package_install_and_check "mesa-zink-vulkan-icd-freedreno"
+		if [[ "$DRY_RUN" == "true" ]]; then
+			print_msg "Dry run: skipping mesa-zink-freedreno installation."
+		else
+			package_install_and_check "mesa-zink-vulkan-icd-freedreno"
+		fi
 		;;
 	"freedreno_kgsl")
 		if [[ "$termux_arch" == "aarch64" || "$termux_arch" == "arm" ]]; then
 			print_msg "${BOLD}Installing freedreno kgsl..."
-			if [[ "$PACKAGE_MANAGER" == "pacman" ]]; then
+			if [[ "$DRY_RUN" == "true" ]]; then
+				print_msg "Dry run: skipping freedreno kgsl installation."
+			elif [[ "$PACKAGE_MANAGER" == "pacman" ]]; then
 				download_file "mesa-vulkan-icd-freedreno.pkg.tar.xz" "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/freedreno-kgsl-25.1/mesa-vulkan-icd-freedreno_25.1.1-2_${termux_arch}.pkg.tar.xz"
 				pacman -Syu --needed
 				pacman -U --noconfirm mesa-vulkan-icd-freedreno.pkg.tar.xz
@@ -109,27 +142,45 @@ function hw_install_required_packages() {
 		fi
 		;;
 	esac
-	print_to_config "exp_termux_vulkan_hw_answer"
+	if declare -f print_to_config >/dev/null 2>&1; then
+		print_to_config "exp_termux_vulkan_hw_answer"
+	fi
 
 	case "$termux_hw_answer" in
 	"zink" | "zink_virgl" | "zink_with_mesa_zink")
-		package_install_and_check "mesa-zink virglrenderer-mesa-zink vulkan-loader-generic angle-android virglrenderer-android"
+		if [[ "$DRY_RUN" == "true" ]]; then
+			print_msg "Dry run: skipping mesa/zink driver packages."
+		else
+			package_install_and_check "mesa-zink virglrenderer-mesa-zink vulkan-loader-generic angle-android virglrenderer-android"
+		fi
 		;;
 	"zink_with_mesa")
-		package_install_and_check "mesa virglrenderer vulkan-loader-generic angle-android virglrenderer-android"
+		if [[ "$DRY_RUN" == "true" ]]; then
+			print_msg "Dry run: skipping mesa/zink-with-mesa driver packages."
+		else
+			package_install_and_check "mesa virglrenderer vulkan-loader-generic angle-android virglrenderer-android"
+		fi
 		;;
 	"virgl" | "virgl_angle")
-		package_install_and_check "angle-android virglrenderer-android"
+		if [[ "$DRY_RUN" == "true" ]]; then
+			print_msg "Dry run: skipping virgl package installation."
+		else
+			package_install_and_check "angle-android virglrenderer-android"
+		fi
 		;;
 	"virgl_vulkan")
-		package_install_and_check "mesa virglrenderer vulkan-loader-generic angle-android virglrenderer-android"
+		if [[ "$DRY_RUN" == "true" ]]; then
+			print_msg "Dry run: skipping virgl-vulkan package installation."
+		else
+			package_install_and_check "mesa virglrenderer vulkan-loader-generic angle-android virglrenderer-android"
+		fi
 		;;
 	*)
 		print_msg "No extra driver packages needed..."
 		;;
 	esac
 
-	if [[ "$exp_termux_vulkan_hw_answer" != "skip" ]]; then
+	if [[ "$exp_termux_vulkan_hw_answer" != "skip" && "$DRY_RUN" != "true" ]]; then
 		package_install_and_check "clvk"
 		# package_install_and_check "opencl-vendor-driver"
 	fi
@@ -241,7 +292,7 @@ function setup_hw_environment_variables() {
 
 function setup_gpu_specific_environment_variables() {
 	if [[ "$exp_termux_vulkan_hw_answer" == "vulkan_wrapper_android" ]] || [[ "$exp_termux_vulkan_hw_answer" == "vulkan_wrapper_android_leegaos_fork" ]] || [[ "$exp_termux_vulkan_hw_answer" == "vulkan_wrapper_android_pipetto_crypto" ]]; then
-		local icd_cpu_arch
+		local icd_cpu_arch=""
 		if [[ "$termux_arch" == "aarch64" ]]; then
 			icd_cpu_arch="aarch64"
 		elif [[ "$termux_arch" == "arm" ]]; then
@@ -274,35 +325,52 @@ function setup_turnip_proot() {
 	banner
 	print_msg "${BOLD}Installing required packages for turnip..."
 	echo
+	if [[ "$DRY_RUN" == "true" ]]; then
+		print_msg "Dry run: skipping turnip proot setup."
+		return 0
+	fi
 	if [[ "$selected_distro" == "debian" ]] || [[ "$selected_distro" == "ubuntu" ]]; then
 		turnip_related_packs="xdg-desktop-portal libgl1 libgl1-mesa-dri libvulkan1 mesa-vulkan-drivers libvulkan1"
 	elif [[ "$selected_distro" == "fedora" ]]; then
 		turnip_related_packs="xdg-desktop-portal mesa-libGL mesa-dri-drivers vulkan-loader mesa-vulkan-drivers"
 	elif [[ "$selected_distro" == "archlinux" ]]; then
 		turnip_related_packs="xdg-desktop-portal mesa vulkan-icd-loader vulkan-mesa-layers"
+	else
+		turnip_related_packs="xdg-desktop-portal"
 	fi
 
 	TURNIP_MESA_VERSION="25.3.4"
+	local turnip_script="$TERMUX_HOME/.turnip-install.sh"
+	cat <<-EOF >"$turnip_script"
+		#!/data/data/com.termux/files/usr/bin/bash
+		set -e
+		pd_package_install_and_check "$turnip_related_packs"
+	EOF
+	chmod +x "$turnip_script"
 
-	install_turnip_related_packs=$(
-		cat <<-EOF
-			pd_package_install_and_check "$turnip_related_packs"
-			check_and_delete "install_turnip_related_packs.sh"
-		EOF
-	)
-	create_shell_script "$save_path/install_turnip_related_packs.sh" "$install_turnip_related_packs"
-	"${selected_distro_type}"-distro login "$selected_distro" -- /bin/bash -c 'bash install_turnip_related_packs.sh'
+	if command -v "${selected_distro_type}-distro" >/dev/null 2>&1; then
+		"${selected_distro_type}"-distro login "$selected_distro" -- /bin/bash -c "bash $turnip_script"
+	else
+		print_warn "The selected distro launcher is not available; skipping the turnip package install step."
+	fi
 
 	download_file "$TERMUX_HOME/turnip.zip" "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/turnip-${TURNIP_MESA_VERSION}/turnip-${TURNIP_MESA_VERSION}-${termux_arch}.zip"
-	"${selected_distro_type}"-distro login "$selected_distro" -- /bin/bash -c "unzip -o $TERMUX_HOME/turnip.zip -d /usr"
+	if command -v "${selected_distro_type}-distro" >/dev/null 2>&1; then
+		"${selected_distro_type}"-distro login "$selected_distro" -- /bin/bash -c "unzip -o $TERMUX_HOME/turnip.zip -d /usr"
+	else
+		print_warn "The selected distro launcher is not available; skipping the turnip archive extraction step."
+	fi
 	check_and_delete "$TERMUX_HOME/turnip.zip"
+	check_and_delete "$turnip_script"
 }
 
 check_termux
 
 # same reason as distro-container-setup script
 function run_hw_acceleration_setup_main() {
-	print_to_config "GPU_NAME"
+	if declare -f print_to_config >/dev/null 2>&1; then
+		print_to_config "GPU_NAME"
+	fi
 	hw_install_required_packages
 	setup_hw_environment_variables
 	setup_gpu_specific_environment_variables

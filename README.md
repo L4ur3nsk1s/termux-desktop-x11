@@ -7,9 +7,9 @@
 </div>
 <div align="center">
 
-![GitHub stars](https://img.shields.io/github/stars/sabamdarif/termux-desktop?style=for-the-badge) ![GitHub issues](https://img.shields.io/github/issues/sabamdarif/termux-desktop?color=violet&style=for-the-badge) ![GitHub repo size](https://img.shields.io/github/repo-size/sabamdarif/termux-desktop?style=for-the-badge) ![GitHub License](https://img.shields.io/github/license/sabamdarif/termux-desktop?style=for-the-badge)
+![GitHub stars](https://img.shields.io/github/stars/L4ur3nsk1s/termux-desktop?style=for-the-badge) ![GitHub issues](https://img.shields.io/github/issues/L4ur3nsk1s/termux-desktop?color=violet&style=for-the-badge) ![GitHub repo size](https://img.shields.io/github/repo-size/L4ur3nsk1s/termux-desktop?style=for-the-badge) ![GitHub License](https://img.shields.io/github/license/L4ur3nsk1s/termux-desktop?style=for-the-badge)
 
-![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/sabamdarif/termux-desktop/total?style=for-the-badge)
+![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/L4ur3nsk1s/termux-desktop/total?style=for-the-badge)
 
 </div>
 
@@ -17,18 +17,18 @@
 
 ## Key Features:
 
-- :books: **Easy Setup:** Easy-to-follow installation process
-- :desktop_computer: **Desktop Styles:** Supports Xfce, LXQt, and Openbox... others with beautiful themes
-- :mechanical_arm: **Hardware Acceleration:** It will install all the drivers in order to get hardware acceleration working under termux
+- :books: **Easy Setup:** Guided installation flow with optional preview mode.
+- :desktop_computer: **Desktop Styles:** Supports Xfce, LXQt, Openbox, MATE, GNOME, Cinnamon, and more.
+- :mechanical_arm: **Hardware Acceleration:** Installs and configures the needed drivers and environment settings for smoother GPU-backed sessions.
 - :paperclips: **GUI Access:**
-    - Termux:X11 (Default)
-    - VNC (optional and only available if you chose `custom` during the setup)
+    - Termux:X11 (default)
+    - VNC (optional)
 - :package: **Package Management:**
-    - APT (Termux's default and recommended)
-    - [PACMAN](https://youtu.be/ditNvG5Nxj0) (pacman may be buggy, not well tested)
-- :shopping: **App Store:** An appstore to install apps
-- :package: **Container** It lets you use a proot/chroot distro as a container to install more apps than Termux normally supports
-- And a lot more, try it
+    - APT (recommended)
+    - [PACMAN](https://youtu.be/ditNvG5Nxj0) (optional and less tested)
+- :shopping: **App Store:** Helpers for installing apps from an app store experience.
+- :package: **Container:** Use a proot/chroot distro as a container for additional software.
+- :sparkles: **Preview Mode:** Review the planned actions first with `--dry-run` before making changes.
 
 ---
 
@@ -69,7 +69,7 @@
 | Desktop Environments         | Window Managers                    |
 | ---------------------------- | ---------------------------------- |
 | [Xfce](/docs/xfce_styles.md) | [Openbox](/docs/openbox_styles.md) |
-| [LXQt](/docs/lxqt_styles.md) | [i3](/docs/i3_styles.md)           |
+| [LXQt](/docs/lxqt_styles.md) | [i3](/docs/i3wm_styles.md)         |
 | MATE                         | dwm                                |
 | GNOME                        | bspwm                              |
 | Cinnamon                     | Awesome                            |
@@ -87,11 +87,17 @@
 > **Android 12+ users:** Disable Phantom Process Killer before installation. [Learn how](https://github.com/atamshkai/Phantom-Process-Killer)
 
 ```bash
-bash <(curl -Lf https://raw.githubusercontent.com/sabamdarif/termux-desktop/main/setup-termux-desktop)
+bash <(curl -Lf https://raw.githubusercontent.com/L4ur3nsk1s/termux-desktop/main/setup-termux-desktop)
+```
+
+To preview the planned actions without applying changes:
+
+```bash
+bash <(curl -Lf https://raw.githubusercontent.com/L4ur3nsk1s/termux-desktop/main/setup-termux-desktop) --dry-run
 ```
 
 > [!TIP]
-> You can also do a lite install which will not install all the optional packages. To do that, first run `export LITE=true` or `export LITE=1`, then run the installer
+> You can also do a lite install which will not install all the optional packages. To do that, first run `export LITE=true` or `export LITE=1`, then run the installer.
 
 ### 🎥 Video Tutorial
 
@@ -200,7 +206,7 @@ Options:
 - `gui -s / --stop` `vnc` _to stop VNC_
 - `gui -s / --stop` `tx11` _to stop Termux:X11_
 - `gui -k / --kill / -kill` _to kill both vncserver and Termux:x11 At Once_
-- `gui --display / gui -d` `<IP_ADDRESS>:<DISPLAY_PORT>` _To launch the current desktop environment on another X11 display server over the same network_. For more click :- [Here](https://github.com/sabamdarif/termux-desktop/blob/main/docs/see-more.md#hammer_and_wrenchhow-to-use-x11-display-forwarding-option)
+- `gui --display / gui -d` `<IP_ADDRESS>:<DISPLAY_PORT>` _To launch the current desktop environment on another X11 display server over the same network_. For more click :- [Here](https://github.com/L4ur3nsk1s/termux-desktop/blob/main/docs/see-more.md#hammer_and_wrenchhow-to-use-x11-display-forwarding-option)
 
 </details>
 
@@ -212,16 +218,21 @@ setup-termux-desktop [options]
 
 Options:
 
-- `--change style`: Change desktop style.
-- `--change hw`: Modify hardware acceleration settings.
-- `--reset`: Reset all changes.
-- `--remove`: Uninstall Termux Desktop.
-- `--local-config`: Start the installation from a pre-made config file.
+- `--dry-run`: Preview the installation plan without making changes.
+- `--install` / `-i`: Start a fresh installation.
+- `--change style|hw|pd|autostart|display|de`: Change settings such as style, hardware acceleration, proot distro, autostart, display port, or desktop environment.
+- `--reinstall icons,themes,config`: Reinstall specific components.
+- `--reset`: Reset configuration changes without uninstalling packages.
+- `--remove` / `-r`: Uninstall Termux Desktop.
+- `--local-config` / `-config`: Start from a pre-made configuration file.
+- `--debug`: Generate a log file for troubleshooting.
 - `--help`: Show help.
 
 <details>
 <summary>Full Example:</summary>
 
+- `setup-termux-desktop --dry-run` _To preview the planned actions without making changes_
+- `setup-termux-desktop --install` _To start a fresh installation_
 - `setup-termux-desktop --change style` _To Change Desktop Style_
 - `setup-termux-desktop --change hw` _To Change Hardware Acceleration Method_
 - `setup-termux-desktop --change pd` _To Change Installed Proot-Distro_
@@ -244,19 +255,10 @@ Options:
   <br>
 
 - `setup-termux-desktop --debug` **(At the start)** _To generate a log file for any of the above commands_
-    - `setup-termux-desktop --debug --install` _To create a log of whole installation process_
+    - `setup-termux-desktop --debug --install` _To create a log of the whole installation process_
 
 </details>
 
----
-
-## Associated Repos:
-
-- [Termux-AppStore](https://github.com/sabamdarif/Termux-AppStore)
-  License: GPL
-
-- [chroot-distro](https://github.com/sabamdarif/chroot-distro)
-  License: GPL
 
 ---
 
@@ -265,7 +267,7 @@ Options:
 This project is licensed under the **[GNU General Public License v3.0](LICENSE)**
 
 ```
-Copyright (C) 2024 sabamdarif
+Copyright (C) 2024 L4ur3nsk1s
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -292,21 +294,3 @@ Special thanks to:
 ---
 
 **If you enjoy this project, consider giving it a star!** :star2:
-
----
-
-## Support the Project
-
-If you find Termux Desktop useful and would like to support its development, consider buying me a coffee! Your support helps me maintain and improve this project.
-
-- **USDT (BEP20,ERC20):-** `0x1d216cf986d95491a479ffe5415dff18dded7e71`
-- **USDT (TRC20):-** `TCjRKPLG4BgNdHibt2yeAwgaBZVB4JoPaD`
-- **BTC:-** `13Q7xf3qZ9xH81rS2gev8N4vD92L9wYiKH`
-- **DOGE (dogecoin):-** `DJkMCnBAFG14TV3BqZKmbbjD8Pi1zKLLG6`
-- **ETH (ERC20):-** `0x1d216cf986d95491a479ffe5415dff18dded7e71`
-
-_Every contribution, no matter how small, helps keep this project alive and growing! ❤️_
-
----
-
-#### Join the conversation: [Telegram Chat](https://t.me/hello_android_0).

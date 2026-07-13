@@ -53,6 +53,7 @@ CALL_FROM_CHANGE_DISTRO=false
 CALL_FROM_CHANGE_STYLE=false
 IS_TERMUX_API_INSTALLED=false
 LITE_MODE="${LITE,,}"
+DRY_RUN=false
 #########################################################################
 #
 # Color Setup
@@ -99,8 +100,26 @@ function banner() {
 	echo " "
 }
 
+function print_dry_run_plan() {
+	banner
+	print_msg "Dry run mode enabled. No changes will be made."
+	echo
+	print_msg "Planned actions:"
+	echo "  • Validate the environment and required tools"
+	echo "  • Inspect/update the installer if needed"
+	echo "  • Gather desktop, theme, hardware, and distro preferences"
+	echo "  • Configure desktop packages, shell, fonts, GUI launchers, and completions"
+	echo "  • Write the final configuration summary"
+	echo
+	print_success "Dry run completed successfully"
+}
+
 # check if the script is running on termux or not
 check_termux() {
+	if [[ "$DRY_RUN" == true ]]; then
+		print_msg "Skipping Termux environment validation because dry run mode is enabled"
+		return 0
+	fi
 	if [[ -z "${PREFIX:-}" ]] ||
 		[[ "$PREFIX" != *"/com.termux/files/usr" ]] ||
 		[[ ! -d "/data/data/com.termux" ]]; then
@@ -842,10 +861,22 @@ function print_to_config() {
 	fi
 
 	if grep -q "^${var_name}=" "$CONFIG_FILE" 2>/dev/null; then
-		# Atomic write: write to temp file then move
-		sed "s|^${var_name}=.*|${var_name}=${var_value}|" "$CONFIG_FILE" >"$temp_file" && mv "$temp_file" "$CONFIG_FILE"
+		awk -v var="$var_name" -v value="$var_value" '
+			BEGIN { found = 0 }
+			$0 ~ "^" var "=" {
+				printf "%s=%s\n", var, value
+				found = 1
+				next
+			}
+			{ print }
+			END {
+				if (!found) {
+					printf "%s=%s\n", var, value
+				}
+			}
+		' "$CONFIG_FILE" >"$temp_file" && mv "$temp_file" "$CONFIG_FILE"
 	else
-		echo "${var_name}=${var_value}" >>"$CONFIG_FILE"
+		printf '%s=%s\n' "$var_name" "$var_value" >>"$CONFIG_FILE"
 	fi
 
 	log_debug "$var_name = $var_value"
@@ -1378,7 +1409,7 @@ function questions_setup_manual() {
 	echo
 	echo "${Y}3. Custom Bash prompt${NC}"
 	echo
-	select_an_option 4 1 chosen_shell_answer
+	select_an_option 3 1 chosen_shell_answer
 	# shellcheck disable=SC2154
 	case "$chosen_shell_answer" in
 	1) chosen_shell_name="zsh" ;;
@@ -5879,6 +5910,14 @@ function reset_changes() {
 # Call Functions
 #
 #########################################################################
+if [[ "${1:-}" == "--debug" ]]; then
+	trap debug_msg debug
+	shift
+fi
+if [[ "${1:-}" == "--dry-run" ]]; then
+	DRY_RUN=true
+	shift
+fi
 check_termux
 detect_package_manager
 if [[ -z "$1" ]] || [[ "$1" == "--install" ]] || [[ "$1" == "-i" ]]; then
@@ -5888,6 +5927,10 @@ current_path=$(pwd)
 get_termux_arch
 function install_termux_desktop() {
 	banner
+	if [[ "$DRY_RUN" == true ]]; then
+		print_dry_run_plan
+		return 0
+	fi
 	update_sys
 	cleanup_cache
 	termux-wake-lock
@@ -5961,6 +6004,7 @@ function install_termux_desktop() {
 function show_help() {
 	cat <<-EOF
 		--debug                 - create a log file
+		--dry-run               - preview the installation plan without making changes
 		-i,--install            - start installation
 		-r,--remove             - remove termux desktop
 		-c,--change             - change some previous configuration
@@ -5999,12 +6043,7 @@ function show_reinstall_help() {
 	EOF
 }
 
-if [[ $1 == "--debug" ]]; then
-	trap debug_msg debug
-	shift
-fi
-
-case $1 in
+case ${1:-} in
 --remove | -r | --uninstall)
 	remove_termux_desktop
 	;;

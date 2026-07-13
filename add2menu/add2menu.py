@@ -24,6 +24,7 @@
 # Repository : https://github.com/sabamdarif/termux-desktop
 
 import os
+import shlex
 import sys
 import subprocess
 import re
@@ -1029,31 +1030,29 @@ class Add2MenuWindow(Gtk.ApplicationWindow):
         if not os.path.exists(directory):
             return desktop_files
 
-        # Use a set for faster lookups of processed files
-        processed_files = set()
-
         for root, _, files in os.walk(directory):
             for file in files:
-                if file.endswith(".desktop") and file not in processed_files:
-                    processed_files.add(file)
-                    filepath = os.path.join(root, file)
-                    try:
-                        desktop_entry = self.parse_desktop_file(filepath)
-                        if desktop_entry and not desktop_entry.get("no_display", False):
-                            display_name = (
-                                desktop_entry.get("name") or os.path.splitext(file)[0]
-                            )
-                            display_name = display_name.replace("_", " ").strip()
-                            icon = (
-                                desktop_entry.get("icon") or "application-x-executable"
-                            )
-                            exec_cmd = desktop_entry.get("exec") or ""
-                            description = desktop_entry.get("comment") or ""
-                            desktop_files.append(
-                                (display_name, filepath, icon, exec_cmd, description)
-                            )
-                    except Exception as e:
-                        print(f"Error processing {filepath}: {str(e)}")
+                if not file.endswith(".desktop"):
+                    continue
+
+                filepath = os.path.join(root, file)
+                try:
+                    desktop_entry = self.parse_desktop_file(filepath)
+                    if desktop_entry and not desktop_entry.get("no_display", False):
+                        display_name = (
+                            desktop_entry.get("name") or os.path.splitext(file)[0]
+                        )
+                        display_name = display_name.replace("_", " ").strip()
+                        icon = (
+                            desktop_entry.get("icon") or "application-x-executable"
+                        )
+                        exec_cmd = desktop_entry.get("exec") or ""
+                        description = desktop_entry.get("comment") or ""
+                        desktop_files.append(
+                            (display_name, filepath, icon, exec_cmd, description)
+                        )
+                except Exception as e:
+                    print(f"Error processing {filepath}: {str(e)}")
 
         # If we're in remove mode, only show files from pd_added directory
         if directory == self.ADDED_DIR:
@@ -1817,11 +1816,12 @@ class Add2MenuWindow(Gtk.ApplicationWindow):
             content = f.read()
 
         # Replace the Exec line with our modified command
-        exec_pattern = re.compile(r"Exec=(.+)")
+        exec_pattern = re.compile(r"^Exec=(.+)$", re.MULTILINE)
+        match = exec_pattern.search(content)
 
-        if exec_pattern.search(content):
+        if match:
             # Extract the original command
-            original_cmd = exec_pattern.search(content).group(1)
+            original_cmd = match.group(1)
 
             # Use pdrun for both chroot and proot since pdrun now supports both
             new_cmd = "pdrun"
@@ -1868,22 +1868,23 @@ class Add2MenuWindow(Gtk.ApplicationWindow):
     def update_system(self):
         """Update desktop database and icon cache using Gio.Subprocess"""
         # Update desktop database
+        update_db_cmd = shutil.which("update-desktop-database") or "/usr/bin/update-desktop-database"
         launcher = Gio.SubprocessLauncher.new(Gio.SubprocessFlags.NONE)
         launcher.set_cwd(self.APPLICATIONS_DIR)
-        launcher.spawnv(["/usr/bin/update-desktop-database", self.APPLICATIONS_DIR])
+        launcher.spawnv([update_db_cmd, self.APPLICATIONS_DIR])
 
-        # Update icon cache
+        icon_cache_cmd = shutil.which("gtk-update-icon-cache") or "/usr/bin/gtk-update-icon-cache"
         launcher = Gio.SubprocessLauncher.new(Gio.SubprocessFlags.NONE)
         launcher.spawnv(
             [
-                "/usr/bin/gtk-update-icon-cache",
+                icon_cache_cmd,
                 os.path.join(self.PREFIX, "share/icons/hicolor"),
             ]
         )
 
-        # Force reload of applications in desktop environment
+        xdg_menu_cmd = shutil.which("xdg-desktop-menu") or "/usr/bin/xdg-desktop-menu"
         launcher = Gio.SubprocessLauncher.new(Gio.SubprocessFlags.NONE)
-        launcher.spawnv(["/usr/bin/setsid", "xdg-desktop-menu", "forceupdate"])
+        launcher.spawnv([xdg_menu_cmd, "forceupdate"])
 
         # Signal success
         GLib.idle_add(self.show_success_message)
@@ -1997,41 +1998,39 @@ class Add2MenuWindow(Gtk.ApplicationWindow):
 
             # In remove mode, we use the command as-is from the desktop file
             if is_remove_mode:
-                # If it doesn't start with pdrun, add it
                 if not cleaned_cmd.startswith("pdrun "):
-                    cmd_parts = ["pdrun"]
-                    cmd_parts.extend(cleaned_cmd.split())
+                    try:
+                        cmd_parts = ["pdrun"] + shlex.split(cleaned_cmd)
+                    except ValueError:
+                        cmd_parts = ["pdrun"] + cleaned_cmd.split()
                 else:
-                    # Already has pdrun, just split it for execution
-                    cmd_parts = cleaned_cmd.split()
+                    try:
+                        cmd_parts = shlex.split(cleaned_cmd)
+                    except ValueError:
+                        cmd_parts = cleaned_cmd.split()
             else:
                 # In add mode, construct the command with the current toggle states
                 # Remove the pdrun prefix if it exists
                 if cleaned_cmd.startswith("pdrun "):
-                    # Remove the pdrun prefix since we'll add it again later
                     cleaned_cmd = cleaned_cmd[6:].strip()
 
-                # Build the final command with appropriate flags
                 cmd_parts = ["pdrun"]
 
-                # Add --root if enabled
                 if self.root_action.get_state().get_boolean():
                     cmd_parts.append("--root")
 
-                # Add --nogpu if enabled
                 if self.nogpu_action.get_state().get_boolean():
                     cmd_parts.append("--nogpu")
 
-                # Add the command
-                cmd_parts.extend(cleaned_cmd.split())
+                try:
+                    cmd_parts.extend(shlex.split(cleaned_cmd))
+                except ValueError:
+                    cmd_parts.extend(cleaned_cmd.split())
 
-                # Add --no-sandbox if enabled
                 if self.no_sandbox_action.get_state().get_boolean():
                     cmd_parts.append("--no-sandbox")
 
-                # Convert to absolute path if enabled
                 if self.absolute_path_action.get_state().get_boolean():
-                    # Find the index of the actual command after pdrun and flags
                     cmd_idx = 1
                     while cmd_idx < len(cmd_parts) and cmd_parts[cmd_idx].startswith(
                         "--"
@@ -2123,7 +2122,11 @@ class Add2MenuWindow(Gtk.ApplicationWindow):
 
     def ensure_absolute_path(self, cmd):
         """Ensure the command uses absolute paths if possible"""
-        parts = cmd.split()
+        try:
+            parts = shlex.split(cmd)
+        except ValueError:
+            parts = cmd.split()
+
         if not parts:
             return cmd
 
@@ -2135,7 +2138,7 @@ class Add2MenuWindow(Gtk.ApplicationWindow):
                 # Make sure it still starts with a slash
                 if not parts[0].startswith("/"):
                     parts[0] = "/" + parts[0]
-            return " ".join(parts)
+            return shlex.join(parts)
 
         # Try to find the program in the distro filesystem's common executable locations
         common_paths = ["/usr/bin/", "/usr/local/bin/", "/bin/", "/usr/sbin/", "/sbin/"]
@@ -2216,10 +2219,10 @@ class Add2MenuWindow(Gtk.ApplicationWindow):
     def filter_apps(self, query):
         """Filter the application list based on the search query"""
         # Store the currently selected items
-        selected_items = {}
-        for i, row in enumerate(self.liststore):
+        selected_items = set()
+        for row in self.liststore:
             if row[0]:
-                selected_items[row[1]] = True
+                selected_items.add(row[2])
 
         # Get the current mode
         is_add_mode = self.add_radio.get_active()
@@ -2264,69 +2267,34 @@ class Add2MenuWindow(Gtk.ApplicationWindow):
             if not os.path.exists(apps_dir):
                 continue
 
-            for root, _, files in os.walk(apps_dir):
-                for file in files:
-                    if file.endswith(".desktop"):
-                        # Skip duplicates
-                        if file in seen_files:
+            for name, filepath, icon, exec_cmd, description in self.list_desktop_files(
+                apps_dir
+            ):
+                if filepath in seen_files:
+                    continue
+
+                seen_files.add(filepath)
+                if (
+                    query.lower() in name.lower()
+                    or query.lower() in filepath.lower()
+                    or query.lower() in (description or "").lower()
+                ):
+                    if (
+                        is_add_mode
+                        and added_apps
+                        and not show_added_apps
+                    ):
+                        filename = os.path.basename(filepath)
+                        if (
+                            filename in added_apps
+                            and name.lower() == added_apps[filename]
+                        ):
+                            skipped_count += 1
                             continue
 
-                        filepath = os.path.join(root, file)
-                        try:
-                            desktop_entry = self.parse_desktop_file(filepath)
-                            if desktop_entry and not desktop_entry.get(
-                                "no_display", False
-                            ):
-                                app_name = (
-                                    desktop_entry.get("name")
-                                    or os.path.splitext(file)[0]
-                                )
-                                app_name = app_name.replace("_", " ").strip()
-
-                                # Check if the app matches the search query
-                                description = desktop_entry.get("comment") or ""
-                                if (
-                                    query.lower() in app_name.lower()
-                                    or query.lower() in file.lower()
-                                    or query.lower() in description.lower()
-                                ):
-                                    # Skip if app is already added (in Add mode) and show_added_apps is False
-                                    if (
-                                        is_add_mode
-                                        and added_apps
-                                        and not show_added_apps
-                                    ):
-                                        filename = os.path.basename(filepath)
-                                        if (
-                                            filename in added_apps
-                                            and app_name.lower() == added_apps[filename]
-                                        ):
-                                            skipped_count += 1
-                                            seen_files.add(file)
-                                            continue
-
-                                    icon = (
-                                        desktop_entry.get("icon")
-                                        or "application-x-executable"
-                                    )
-                                    exec_cmd = desktop_entry.get("exec") or ""
-
-                                    # Check if the item was previously selected
-                                    is_selected = app_name in selected_items
-
-                                    filtered_apps.append(
-                                        (
-                                            is_selected,
-                                            app_name,
-                                            filepath,
-                                            icon,
-                                            exec_cmd,
-                                            description,
-                                        )
-                                    )
-                                    seen_files.add(file)
-                        except Exception as e:
-                            print(f"Error processing {filepath}: {str(e)}")
+                    filtered_apps.append(
+                        [filepath in selected_items, name, filepath, icon, exec_cmd, description]
+                    )
 
         # Log how many apps were filtered out
         if is_add_mode and skipped_count > 0:
@@ -2338,6 +2306,9 @@ class Add2MenuWindow(Gtk.ApplicationWindow):
         self.liststore.clear()
         for item in sorted(filtered_apps, key=lambda x: x[1].lower()):
             self.liststore.append(item)
+
+        # Reset the select-all checkbox when search results change
+        self.select_all_check.set_active(False)
 
         # Update status bar
         self.status_label.set_text(f"Found {len(filtered_apps)} apps matching: {query}")
@@ -2492,6 +2463,8 @@ class Add2MenuWindow(Gtk.ApplicationWindow):
 
 
 class Add2MenuApplication(Gtk.Application):
+    SETTINGS_PATH = os.path.expanduser("~/.config/add2menu/settings.conf")
+
     def __init__(self):
         Gtk.Application.__init__(
             self,
@@ -2509,6 +2482,66 @@ class Add2MenuApplication(Gtk.Application):
         )
         self.log_window = None  # Terminal log window instance
 
+    def load_settings(self):
+        """Load persisted toggle settings from the user config."""
+        if not os.path.exists(self.SETTINGS_PATH):
+            return
+
+        try:
+            with open(self.SETTINGS_PATH, "r", encoding="utf-8") as settings_file:
+                for line in settings_file:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" not in line:
+                        continue
+                    local_key, local_value = line.split("=", 1)
+                    local_key = local_key.strip()
+                    local_value = local_value.strip().lower()
+
+                    if local_value == "true":
+                        value = True
+                    elif local_value == "false":
+                        value = False
+                    else:
+                        continue
+
+                    if local_key == "no_sandbox":
+                        self.no_sandbox = value
+                    elif local_key == "absolute_path":
+                        self.use_absolute_path = value
+                    elif local_key == "nogpu":
+                        self.nogpu = value
+                    elif local_key == "root":
+                        self.root = value
+                    elif local_key == "show_added_apps":
+                        self.show_added_apps = value
+                    elif local_key == "show_app_launch_log":
+                        self.show_app_launch_log = value
+        except Exception as e:
+            print(f"Failed to load settings: {e}")
+
+    def save_settings(self):
+        """Persist toggle settings so they are restored on next launch."""
+        settings_dir = os.path.dirname(self.SETTINGS_PATH)
+        try:
+            os.makedirs(settings_dir, exist_ok=True)
+            with open(self.SETTINGS_PATH, "w", encoding="utf-8") as settings_file:
+                settings_file.write(f"no_sandbox={str(self.no_sandbox).lower()}\n")
+                settings_file.write(
+                    f"absolute_path={str(self.use_absolute_path).lower()}\n"
+                )
+                settings_file.write(f"nogpu={str(self.nogpu).lower()}\n")
+                settings_file.write(f"root={str(self.root).lower()}\n")
+                settings_file.write(
+                    f"show_added_apps={str(self.show_added_apps).lower()}\n"
+                )
+                settings_file.write(
+                    f"show_app_launch_log={str(self.show_app_launch_log).lower()}\n"
+                )
+        except Exception as e:
+            print(f"Failed to save settings: {e}")
+
     def do_startup(self):
         Gtk.Application.do_startup(self)
 
@@ -2522,44 +2555,46 @@ class Add2MenuApplication(Gtk.Application):
         about_action.connect("activate", self.on_about)
         self.add_action(about_action)
 
+        self.load_settings()
+
         # Add no-sandbox toggle action
         no_sandbox_action = Gio.SimpleAction.new_stateful(
-            "no-sandbox", None, GLib.Variant.new_boolean(False)
+            "no-sandbox", None, GLib.Variant.new_boolean(self.no_sandbox)
         )
         no_sandbox_action.connect("change-state", self.on_no_sandbox_toggled)
         self.add_action(no_sandbox_action)
 
         # Add absolute path toggle action
         absolute_path_action = Gio.SimpleAction.new_stateful(
-            "absolute-path", None, GLib.Variant.new_boolean(False)
+            "absolute-path", None, GLib.Variant.new_boolean(self.use_absolute_path)
         )
         absolute_path_action.connect("change-state", self.on_absolute_path_toggled)
         self.add_action(absolute_path_action)
 
         # Add nogpu toggle action
         nogpu_action = Gio.SimpleAction.new_stateful(
-            "nogpu", None, GLib.Variant.new_boolean(False)
+            "nogpu", None, GLib.Variant.new_boolean(self.nogpu)
         )
         nogpu_action.connect("change-state", self.on_nogpu_toggled)
         self.add_action(nogpu_action)
 
         # Add root toggle action
         root_action = Gio.SimpleAction.new_stateful(
-            "root", None, GLib.Variant.new_boolean(False)
+            "root", None, GLib.Variant.new_boolean(self.root)
         )
         root_action.connect("change-state", self.on_root_toggled)
         self.add_action(root_action)
 
         # Add show-added-apps toggle action
         show_added_apps_action = Gio.SimpleAction.new_stateful(
-            "show-added-apps", None, GLib.Variant.new_boolean(False)
+            "show-added-apps", None, GLib.Variant.new_boolean(self.show_added_apps)
         )
         show_added_apps_action.connect("change-state", self.on_show_added_apps_toggled)
         self.add_action(show_added_apps_action)
 
         # Add show-app-launch-log toggle action
         show_app_launch_log_action = Gio.SimpleAction.new_stateful(
-            "show-app-launch-log", None, GLib.Variant.new_boolean(False)
+            "show-app-launch-log", None, GLib.Variant.new_boolean(self.show_app_launch_log)
         )
         show_app_launch_log_action.connect(
             "change-state", self.on_show_app_launch_log_toggled
@@ -2611,26 +2646,31 @@ class Add2MenuApplication(Gtk.Application):
         """Handle no-sandbox toggle"""
         action.set_state(value)
         self.no_sandbox = value.get_boolean()
+        self.save_settings()
 
     def on_absolute_path_toggled(self, action, value):
         """Handle absolute path toggle"""
         action.set_state(value)
         self.use_absolute_path = value.get_boolean()
+        self.save_settings()
 
     def on_nogpu_toggled(self, action, value):
         """Handle nogpu toggle"""
         action.set_state(value)
         self.nogpu = value.get_boolean()
+        self.save_settings()
 
     def on_root_toggled(self, action, value):
         """Handle root toggle"""
         action.set_state(value)
         self.root = value.get_boolean()
+        self.save_settings()
 
     def on_show_added_apps_toggled(self, action, value):
         """Handle show-added-apps toggle"""
         action.set_state(value)
         self.show_added_apps = value.get_boolean()
+        self.save_settings()
 
         # Refresh the application list to apply the new filter setting,
         # but only if we are in the Add mode where it's relevant
@@ -2642,13 +2682,14 @@ class Add2MenuApplication(Gtk.Application):
         action.set_state(value)
         self.show_app_launch_log = value.get_boolean()
 
-        # Create the log window if it doesn't exist, but don't show it yet
-        # It will be shown when an app is launched
+        # Create the log window if it doesn't exist
         if self.show_app_launch_log and not self.log_window:
             self.log_window = TerminalLogWindow(self.window)
 
-        # If logging is disabled and the window is visible, hide it
-        if (
+        if self.show_app_launch_log and self.log_window:
+            # Show the log window immediately when logging is enabled
+            self.log_window.show_all()
+        elif (
             not self.show_app_launch_log
             and self.log_window
             and self.log_window.get_visible()
